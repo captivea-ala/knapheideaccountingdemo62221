@@ -2,7 +2,7 @@
     'name': "Knapheide Account Register Payment",
     'version': "14.0",
     'category': "account",
-    'depends': ['account', 'payment_fix_register_token'],
+    'depends': ['account', 'payment_fix_register_token', 'base'],
     'author':'konsultoo',
     'website':'https://www.konsultoo.com/',
     'summary'
