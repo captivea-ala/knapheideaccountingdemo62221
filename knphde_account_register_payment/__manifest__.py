@@ -11,8 +11,8 @@
     """,
     'data': [
         'security/ir.model.access.csv',
-        'views/account_move_view.xml',
         'views/res_partner_view.xml',
+        'views/account_move_view.xml',
         'wizard/account_register_payment_view.xml',
         ],
     'installable': True,
