@@ -39,20 +39,36 @@ class AccountPaymentRegister(models.TransientModel):
         help="Technical field used to indicate the user can see the 'group_payments' box.")
     # company_id = fields.Many2one('res.company', store=True, copy=False,
     #     compute='_compute_from_lines')
-    company_id = fields.Many2one('res.company', store=True, copy=False, compute=False, domain = lambda self: "[('id','in',%s)]" % self._context.get('allowed_company_ids'))
+    company_id = fields.Many2one('res.company', required=True, store=True, copy=False, compute=False, domain = lambda self: "[('id','in',%s)]" % self._context.get('allowed_company_ids'))
     partner_id = fields.Many2one('res.partner',
         string="Customer/Vendor", store=True, copy=False, ondelete='restrict',
         compute='_compute_from_lines')
     journal_id = fields.Many2one('account.journal', store=True, readonly=False,
         compute=False,
         domain="[('company_id', '=', company_id), ('type', 'in', ('bank', 'cash'))]")
-    group_payment = fields.Boolean(string="Group Payments", store=True, readonly=False,
-        compute=False,
-        help="Only one payment will be created by partner (bank)/ currency.", default=True)
+    group_payment = fields.Boolean(string="Group Payments", store=True, readonly=True,
+        compute='_compute_group_payment',
+        help="Only one payment will be created by partner (bank)/ currency.")
     
     invoice_bill_ids = fields.Many2many("unique.invoice.bills",'unique_invoice_bills_acc_pay_reg_rel','invoice_bill_id','account_payment_register_id',"Unique Invoices/Bills")
     
-    
+    # @api.depends('can_edit_wizard')
+    # def _compute_group_payment(self):
+    #     for wizard in self:
+    #         if wizard.can_edit_wizard:
+    #             batches = wizard._get_batches()
+    #             wizard.group_payment = len(batches[0]['lines'].move_id) >= 1
+    #         else:
+    #             wizard.group_payment = False
+    @api.depends('can_edit_wizard')
+    def _compute_group_payment(self):
+        for wizard in self:
+            if wizard.can_edit_wizard:
+                batches = wizard._get_batches()
+                wizard.group_payment = len(batches[0]['lines'].move_id) >= 1
+            else:
+                wizard.group_payment = True
+
     def _get_batches(self):
         ''' Group the account.move.line linked to the wizard together.
         :return: A list of batches, each one containing:
@@ -192,17 +208,6 @@ class AccountPaymentRegister(models.TransientModel):
                     unique_inv_bill_id = self.env['unique.invoice.bills'].create({'partner_id': k, 'account_move_ids': [(6,0,move_ids.ids)], 'company_id': comp.id, 'total_amount': total_amount})
                     unique_invoice_bills_ids |= unique_inv_bill_id
             # Check.
-            # available_lines = self.env['account.move.line']
-            # for k, v in partner_dict.items():
-            #     print ("key --->>", k)
-            #     print ("value --->>", v)
-            #     if len(v['company_list']) > 1:
-            #         for rec in v['record_list']:
-            #             available_lines |= rec
-            #     if len(v['company_list']) == 1:
-            #         for rec in v['record_list']:
-            #             print ("rec ****************************--------->>", rec)
-            
             if not available_lines:
                 raise UserError(_("You can't register a payment because there is nothing left to pay on the selected journal items."))
             # if len(lines.company_id) > 1:
@@ -214,7 +219,6 @@ class AccountPaymentRegister(models.TransientModel):
             res['invoice_bill_ids'] = [(6, 0, unique_invoice_bills_ids.ids)]
         
         # res = super().default_get(fields_list)
-        print ("res --->>", res)
         return res
 
     def _create_payments(self):
@@ -244,9 +248,10 @@ class AccountPaymentRegister(models.TransientModel):
                 payment_vals_list.append(self._create_payment_vals_from_batch(batch_result))
                 to_reconcile.append(batch_result['lines'])
         
-        payments = self.env['account.payment'].create(payment_vals_list)
+        
         
         #create intercompany journal entries if the payment company and journal item entry is different.
+        intercompany_journal_entries_list = []
         for inv_bill in self.invoice_bill_ids:
             journal_lines = []
             if inv_bill.company_id != self.company_id:
@@ -299,8 +304,20 @@ class AccountPaymentRegister(models.TransientModel):
                         'ref': '/',
                         'line_ids': journal_lines
                     })
+                intercompany_journal_entries_list.append(inter_comp_journal_entry)
                 inter_comp_journal_entry.action_post()
+            # Update payment method for payments list for creating payments
+            for pay_val in payment_vals_list:
+                if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'outbound':
+                    pay_val.update({'payment_method_id': inv_bill.vendor_payment_method.id})
 
+        payments = self.env['account.payment'].create(payment_vals_list)
+        #update intercompany journal entry in related payment.
+        if intercompany_journal_entries_list:
+            for payment in payments:
+                for int_jrnl_entry in intercompany_journal_entries_list:
+                    if payment.amount == int_jrnl_entry.amount_total:
+                        payment.update({'intercompany_move_id': int_jrnl_entry.id})
         
         # If payments are made using a currency different than the source one, ensure the balance match exactly in
         # order to fully paid the source journal items.
@@ -382,3 +399,5 @@ class UniqueInvoiceBill(models.TransientModel):
     account_move_ids = fields.Many2many("account.move",'unique_invoice_bill_account_move_rel','unique_inv_bill_id','account_move_id', "Moves")
     company_id = fields.Many2one("res.company", string="Company")
     total_amount = fields.Float(string="Amount")
+    customer_payment_method = fields.Many2one(related="partner_id.customer_payment_method", string="Customer Payment Method", readonly=False)
+    vendor_payment_method = fields.Many2one(related="partner_id.vendor_payment_method", string="Vendor Payment Method", readonly=False)

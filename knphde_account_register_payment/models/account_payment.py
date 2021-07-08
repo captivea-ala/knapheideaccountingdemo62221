@@ -7,6 +7,18 @@ class AccountPayment(models.Model):
     
     _inherit = 'account.payment'
     _check_company_auto = False
+    
+    intercompany_move_id = fields.Many2one("account.move", string="Intercompany Journal Entry")
+    
+    def unlink(self):
+        # OVERRIDE to unlink the inherited account.move (move_id field) as well.
+        # moves = self.with_context(force_delete=True).move_id
+        intercompany_moves = self.with_context(force_delete=True).intercompany_move_id
+        res = super().unlink()
+        if intercompany_moves:
+            intercompany_moves.button_draft()
+            intercompany_moves.button_cancel()
+        return res
 
 class AccountAccount(models.Model):
     
