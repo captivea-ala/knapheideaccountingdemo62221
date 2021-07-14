@@ -1,5 +1,4 @@
 
-
 from odoo import models, fields, api, _
 from datetime import datetime
 from odoo.exceptions import UserError
@@ -87,8 +86,8 @@ class AccountPaymentRegister(models.TransientModel):
         batches = {}
         for line in lines:
             batch_key = self._get_line_batch_key(line)
-            serialized_key = '-'.join(str(v) for v in batch_key.values())
-            # serialized_key = '-'.join(str(v) for k,v in batch_key.items() if not k == 'account_id')
+            # serialized_key = '-'.join(str(v) for v in batch_key.values())
+            serialized_key = '-'.join(str(v) for k,v in batch_key.items() if not k == 'account_id' and not k == 'currency_id')
             batches.setdefault(serialized_key, {
                 'key_values': batch_key,
                 'lines': self.env['account.move.line'],
@@ -196,17 +195,17 @@ class AccountPaymentRegister(models.TransientModel):
                         recordlist.append(line.move_id.id)
                         payment_amount += ((line.credit if line.debit == 0 else line.debit) or (line.debit if line.credit == 0 else line.credit))
                         if line.company_id not in companylist:
-                            companylist.append(line.company_id)
+                            companylist.append(line.company_id.id)
                 partner_dict.update({partner_id:{'company_list': companylist, 'record_list': recordlist, 'payment_amount': payment_amount}})
             unique_invoice_bills_ids = self.env['unique.invoice.bills']
             for k, v in partner_dict.items():
-                for comp in v['company_list']:
-                    move_ids = self.env['account.move'].search([('id', 'in', v['record_list']),('company_id','=',comp.id)])
-                    total_amount = 0.0
-                    for mv in move_ids:
-                        total_amount += mv.amount_total
-                    unique_inv_bill_id = self.env['unique.invoice.bills'].create({'partner_id': k, 'account_move_ids': [(6,0,move_ids.ids)], 'company_id': comp.id, 'total_amount': total_amount})
-                    unique_invoice_bills_ids |= unique_inv_bill_id
+                # for comp in :
+                move_ids = self.env['account.move'].search([('id', 'in', v['record_list']),('company_id','in',v['company_list'])])
+                total_amount = 0.0
+                for mv in move_ids:
+                    total_amount += mv.amount_total
+                unique_inv_bill_id = self.env['unique.invoice.bills'].create({'partner_id': k, 'account_move_ids': [(6,0,move_ids.ids)], 'company_ids': [(6,0,v['company_list'])], 'total_amount': total_amount})
+                unique_invoice_bills_ids |= unique_inv_bill_id
             # Check.
             if not available_lines:
                 raise UserError(_("You can't register a payment because there is nothing left to pay on the selected journal items."))
@@ -220,12 +219,34 @@ class AccountPaymentRegister(models.TransientModel):
         
         # res = super().default_get(fields_list)
         return res
+    
+    # def _custom_create_payment_vals_from_wizard(self, inv_bill):
+    #     payment_vals = {
+    #         'date': self.payment_date,
+    #         'amount': inv_bill.total_amount,
+    #         'payment_type': self.payment_type,
+    #         'partner_type': self.partner_type,
+    #         'ref': self.communication,
+    #         'journal_id': self.journal_id.id,
+    #         'currency_id': self.currency_id.id,
+    #         'partner_id': inv_bill.partner_id.id,
+    #         'partner_bank_id': self.partner_bank_id.id,
+    #         'payment_method_id': inv_bill.vendor_payment_method.id if self.payment_type == 'outbound' else inv_bill.customer_payment_method.id,
+    #         'destination_account_id': self.line_ids[0].account_id.id
+    #     }
+    #
+    #     if not self.currency_id.is_zero(self.payment_difference) and self.payment_difference_handling == 'reconcile':
+    #         payment_vals['write_off_line_vals'] = {
+    #             'name': self.writeoff_label,
+    #             'amount': self.payment_difference,
+    #             'account_id': self.writeoff_account_id.id,
+    #         }
+    #     return payment_vals
 
     def _create_payments(self):
         self.ensure_one()
         batches = self._get_batches()
         edit_mode = self.can_edit_wizard and (len(batches[0]['lines']) == 1 or self.group_payment)
-
         to_reconcile = []
         if edit_mode:
             payment_vals = self._create_payment_vals_from_wizard()
@@ -247,77 +268,99 @@ class AccountPaymentRegister(models.TransientModel):
             for batch_result in batches:
                 payment_vals_list.append(self._create_payment_vals_from_batch(batch_result))
                 to_reconcile.append(batch_result['lines'])
-        
-        
-        
+
         #create intercompany journal entries if the payment company and journal item entry is different.
         intercompany_journal_entries_list = []
         for inv_bill in self.invoice_bill_ids:
             journal_lines = []
-            if inv_bill.company_id != self.company_id:
-                #search intercompany account
-                move_type = inv_bill.account_move_ids.mapped('move_type')[0]
-                int_comp_acc_id = self.env['account.account'].search([('name','ilike','Intercompany'),('company_id','=',inv_bill.company_id.id)], limit=1)
-                acc_rec_id = self.env['account.account'].search([('name','ilike','Account Receivable'),('company_id','=',inv_bill.company_id.id)], limit=1)
-                acc_pay_id = self.env['account.account'].search([('name','ilike','Account Payable'),('company_id','=',inv_bill.company_id.id)], limit=1)
-                acc_journal_id = self.env['account.journal'].search([('name','ilike',self.journal_id.name),('company_id','=',inv_bill.company_id.id)], limit=1)
-                if not int_comp_acc_id:
-                    raise UserError(_("Please create an intercompany account!"))
-                if not acc_rec_id:
-                    raise UserError(_("Please create a receivable account for %s company!",inv_bill.company_id.id))
-                if not acc_pay_id:
-                    raise UserError(_("Please create a payable account for %s company!",inv_bill.company_id.id))
-                if not acc_journal_id:
-                    raise UserError(_("Please create an account journal for %s company!",inv_bill.company_id.id))
-                #Vendor Bill or Refund
-                if move_type in ['in_invoice', 'in_refund']:
-                    journal_lines.append((0, 0, {
-                        'account_id': int_comp_acc_id.id,
-                        'debit': inv_bill.total_amount,
-                        'credit': 0
-                    }))
-                    journal_lines.append((0, 0, {
-                        'account_id': acc_pay_id.id,
-                        'debit': 0,
-                        'credit': inv_bill.total_amount
-                    }))
-                if move_type in ['out_invoice','out_refund']:
-                    journal_lines.append((0, 0, {
-                        'account_id': int_comp_acc_id.id,
-                        'debit': 0,
-                        'credit': inv_bill.total_amount
-                    }))
-                    journal_lines.append((0, 0, {
-                        'account_id': acc_rec_id.id,
-                        'debit': inv_bill.total_amount,
-                        'credit': 0
-                    }))
-                #Post the intercompany journal entry after creating it
-                inter_comp_journal_entry = self.env['account.move'].create({
-                        'partner_id': inv_bill.partner_id.id,
-                        'date': self.payment_date,
-                        'invoice_date_due': self.payment_date,
-                        'company_id': inv_bill.company_id.id,
-                        'journal_id': acc_journal_id.id,
-                        'move_type': 'entry',
-                        'name': False,
-                        'ref': '/',
-                        'line_ids': journal_lines
-                    })
-                intercompany_journal_entries_list.append(inter_comp_journal_entry)
-                inter_comp_journal_entry.action_post()
-            # Update payment method for payments list for creating payments
-            for pay_val in payment_vals_list:
-                if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'outbound':
-                    pay_val.update({'payment_method_id': inv_bill.vendor_payment_method.id})
-
+            for comp_id in inv_bill.company_ids:
+                intercompany_total_amount = 0.0
+                if comp_id != self.company_id:
+                    #Get intercompany amount
+                    intercompany_move_names_list = []
+                    intercompany_move_ids = inv_bill.account_move_ids.filtered(lambda mv: mv.company_id == comp_id).sorted(lambda m: m.id)
+                    for move in intercompany_move_ids:
+                        intercompany_total_amount += move.amount_total
+                        intercompany_move_names_list.append(move.name)
+                    intercompany_move_name = ' '.join([nm for nm in intercompany_move_names_list])
+                    #search intercompany account
+                    move_type = inv_bill.account_move_ids.mapped('move_type')[0]
+                    int_comp_acc_id = self.env['account.account'].search([('name','ilike','Intercompany'),('company_id','=',comp_id.id)], limit=1)
+                    acc_rec_id = self.env['account.account'].search([('name','=','Account Receivable'),('company_id','=',comp_id.id)], limit=1)
+                    acc_pay_id = self.env['account.account'].search([('name','=','Account Payable'),('company_id','=',comp_id.id)], limit=1)
+                    acc_journal_id = self.env['account.journal'].search([('name','ilike',self.journal_id.name),('company_id','=',comp_id.id)], limit=1)
+                    if not int_comp_acc_id:
+                        raise UserError(_("Please create an intercompany account!"))
+                    if not acc_rec_id:
+                        raise UserError(_("Please create a receivable account for %s company!",comp_id.id))
+                    if not acc_pay_id:
+                        raise UserError(_("Please create a payable account for %s company!",comp_id.id))
+                    if not acc_journal_id:
+                        raise UserError(_("Please create an account journal for %s company!",comp_id.id))
+                    #Vendor Bill or Refund
+                    if move_type in ['in_invoice', 'in_refund']:
+                        journal_lines.append((0, 0, {
+                            'account_id': int_comp_acc_id.id,
+                            'debit': intercompany_total_amount,
+                            'credit': 0
+                        }))
+                        journal_lines.append((0, 0, {
+                            'account_id': acc_pay_id.id,
+                            'debit': 0,
+                            'credit': intercompany_total_amount
+                        }))
+                    if move_type in ['out_invoice','out_refund']:
+                        journal_lines.append((0, 0, {
+                            'account_id': int_comp_acc_id.id,
+                            'debit': 0,
+                            'credit': intercompany_total_amount
+                        }))
+                        journal_lines.append((0, 0, {
+                            'account_id': acc_rec_id.id,
+                            'debit': intercompany_total_amount,
+                            'credit': 0
+                        }))
+                    #Post the intercompany journal entry after creating it
+                    inter_comp_journal_entry = self.env['account.move'].create({
+                            'partner_id': inv_bill.partner_id.id,
+                            'date': self.payment_date,
+                            'invoice_date_due': self.payment_date,
+                            'company_id': comp_id.id,
+                            'journal_id': acc_journal_id.id,
+                            'move_type': 'entry',
+                            'name': False,
+                            'ref': intercompany_move_name,
+                            'line_ids': journal_lines
+                        })
+                    intercompany_journal_entries_list.append(inter_comp_journal_entry)
+                    inter_comp_journal_entry.action_post()
+                # Update payment method for payments list for creating payments
+                for pay_val in payment_vals_list:
+                    if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'outbound':
+                        pay_val.update({'payment_method_id': inv_bill.vendor_payment_method.id})
+                        if intercompany_journal_entries_list:
+                            for int_jrnl_entry in intercompany_journal_entries_list:
+                                if int_jrnl_entry.ref in pay_val['ref']:
+                                    pay_val.update({'intercompany_move_ids': [(6,0,[int_jrnl_entry.id])]})
+                                else:
+                                    continue
+                    if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'inbound':
+                        pay_val.update({'payment_method_id': inv_bill.customer_payment_method.id})
+                        if intercompany_journal_entries_list:
+                            for int_jrnl_entry in intercompany_journal_entries_list:
+                                if int_jrnl_entry.ref in pay_val['ref']:
+                                    pay_val.update({'intercompany_move_ids': [(6,0,[int_jrnl_entry.id])]})
+                                else:
+                                    continue
+        
         payments = self.env['account.payment'].create(payment_vals_list)
         #update intercompany journal entry in related payment.
-        if intercompany_journal_entries_list:
-            for payment in payments:
-                for int_jrnl_entry in intercompany_journal_entries_list:
-                    if payment.amount == int_jrnl_entry.amount_total:
-                        payment.update({'intercompany_move_id': int_jrnl_entry.id})
+        # print ("intercompany_journal_entries_list --->>", intercompany_journal_entries_list)
+        # if intercompany_journal_entries_list:
+        #     for payment in payments:
+        #         for int_jrnl_entry in intercompany_journal_entries_list:
+        #             if int_jrnl_entry.ref in payment.ref:
+        #                 payment.update({'intercompany_move_ids': [(6,0,[int_jrnl_entry.id])]})
         
         # If payments are made using a currency different than the source one, ensure the balance match exactly in
         # order to fully paid the source journal items.
@@ -350,14 +393,12 @@ class AccountPaymentRegister(models.TransientModel):
                     # Fix the balance but make sure to peek the liquidity and counterpart lines first.
                     debit_lines = (liquidity_lines + counterpart_lines).filtered('debit')
                     credit_lines = (liquidity_lines + counterpart_lines).filtered('credit')
-
+                    
                     payment.move_id.write({'line_ids': [
                         (1, debit_lines[0].id, {'debit': debit_lines[0].debit + delta_balance}),
                         (1, credit_lines[0].id, {'credit': credit_lines[0].credit + delta_balance}),
                     ]})
-
         payments.action_post()
-
         domain = [('account_internal_type', 'in', ('receivable', 'payable')), ('reconciled', '=', False)]
         for payment, lines in zip(payments, to_reconcile):
 
@@ -369,9 +410,11 @@ class AccountPaymentRegister(models.TransientModel):
             payment_lines = payment.line_ids.filtered_domain(domain)
             for account in payment_lines.account_id:
                 (payment_lines + lines)\
-                    .filtered_domain([('account_id', '=', account.id), ('reconciled', '=', False)])\
+                    .filtered_domain([('reconciled', '=', False)])\
                     .reconcile()
-
+                # (payment_lines + lines)\
+                #     .filtered_domain([('account_id', '=', account.id), ('reconciled', '=', False)])\
+                #     .reconcile()
         return payments
     
     
@@ -398,6 +441,7 @@ class UniqueInvoiceBill(models.TransientModel):
     partner_id = fields.Many2one("res.partner")
     account_move_ids = fields.Many2many("account.move",'unique_invoice_bill_account_move_rel','unique_inv_bill_id','account_move_id', "Moves")
     company_id = fields.Many2one("res.company", string="Company")
+    company_ids = fields.Many2many("res.company", 'res_company_unique_invoice_bills_rel','company_id','unique_invoice_bills_id', string="Companies")
     total_amount = fields.Float(string="Amount")
     customer_payment_method = fields.Many2one(related="partner_id.customer_payment_method", string="Customer Payment Method", readonly=False)
     vendor_payment_method = fields.Many2one(related="partner_id.vendor_payment_method", string="Vendor Payment Method", readonly=False)

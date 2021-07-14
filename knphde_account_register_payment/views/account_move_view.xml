@@ -6,7 +6,7 @@
         <field name="inherit_id" ref="account.view_account_payment_form"/>
         <field name="arch" type="xml">
             <xpath expr="//field[@name='move_id']" position="after">
-                <field name="intercompany_move_id"/>
+                <field name="intercompany_move_ids" widget="many2many_tags"/>
             </xpath>
         </field>
     </record>

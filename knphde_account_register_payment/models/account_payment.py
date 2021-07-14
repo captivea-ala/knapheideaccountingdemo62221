@@ -1,6 +1,7 @@
 
 
-from odoo import models, fields, api
+from odoo import models, fields, api, _
+from odoo.exceptions import UserError
 
 
 class AccountPayment(models.Model):
@@ -8,16 +9,17 @@ class AccountPayment(models.Model):
     _inherit = 'account.payment'
     _check_company_auto = False
     
-    intercompany_move_id = fields.Many2one("account.move", string="Intercompany Journal Entry")
+    intercompany_move_ids = fields.Many2many("account.move", 'acc_mv_acc_pmnt_rel', 'account_payment_id', 'account_move_id', string="Intercompany Journal Entry")
     
     def unlink(self):
         # OVERRIDE to unlink the inherited account.move (move_id field) as well.
         # moves = self.with_context(force_delete=True).move_id
-        intercompany_moves = self.with_context(force_delete=True).intercompany_move_id
+        intercompany_moves = self.with_context(force_delete=True).intercompany_move_ids
         res = super().unlink()
         if intercompany_moves:
-            intercompany_moves.button_draft()
-            intercompany_moves.button_cancel()
+            for int_move in intercompany_moves:
+                int_move.button_draft()
+                int_move.button_cancel()
         return res
 
 class AccountAccount(models.Model):
@@ -67,9 +69,9 @@ class AccountMoveLine(models.Model):
                 pass
             if account is None:
                 account = line.account_id
-            elif line.account_id != account:
-                raise UserError(_("Entries are not from the same account: %s != %s")
-                                % (account.display_name, line.account_id.display_name))
+            # elif line.account_id != account:
+            #     raise UserError(_("Entries are not from the same account: %s != %s")
+            #                     % (account.display_name, line.account_id.display_name))
 
         sorted_lines = self.sorted(key=lambda line: (line.date_maturity or line.date, line.currency_id))
 

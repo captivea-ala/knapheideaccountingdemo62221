@@ -18,6 +18,7 @@
                         	<field name="customer_payment_method" attrs="{'column_invisible' : [('parent.payment_type','=','outbound')]}"/>
                         	<field name="vendor_payment_method" attrs="{'column_invisible' : [('parent.payment_type','=','inbound')]}"/>
                         	<field name="company_id" readonly="1"/>
+                        	<field name="company_ids" widget="many2many_tags" readonly="1"/>
                         	<field name="total_amount" readonly="1"/>
                         </tree>
                         <form>
@@ -30,11 +31,15 @@
                         	    <group>
                         	    	<field name="vendor_payment_method"/>
                         			<field name="company_id" readonly="1"/>
+                        			<field name="company_ids" widget="many2many_tags" readonly="1"/>
                         			<field name="total_amount" readonly="1"/>
                         	    </group>
                         	</group>
                         </form>
                     </field>
+                </xpath>
+                <xpath expr="//field[@name='payment_method_id']" position="attributes">
+                    <attribute name='invisible'>1</attribute>
                 </xpath>
             </field>
         </record>
