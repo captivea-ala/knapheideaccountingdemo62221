@@ -272,86 +272,100 @@ class AccountPaymentRegister(models.TransientModel):
         #create intercompany journal entries if the payment company and journal item entry is different.
         intercompany_journal_entries_list = []
         for inv_bill in self.invoice_bill_ids:
-            journal_lines = []
+            intercompany_companies_list = []
             for comp_id in inv_bill.company_ids:
-                intercompany_total_amount = 0.0
                 if comp_id != self.company_id:
-                    #Get intercompany amount
-                    intercompany_move_names_list = []
-                    intercompany_move_ids = inv_bill.account_move_ids.filtered(lambda mv: mv.company_id == comp_id).sorted(lambda m: m.id)
-                    for move in intercompany_move_ids:
-                        intercompany_total_amount += move.amount_total
-                        intercompany_move_names_list.append(move.name)
-                    intercompany_move_name = ' '.join([nm for nm in intercompany_move_names_list])
-                    #search intercompany account
-                    move_type = inv_bill.account_move_ids.mapped('move_type')[0]
-                    int_comp_acc_id = self.env['account.account'].search([('name','ilike','Intercompany'),('company_id','=',comp_id.id)], limit=1)
-                    acc_rec_id = self.env['account.account'].search([('name','=','Account Receivable'),('company_id','=',comp_id.id)], limit=1)
-                    acc_pay_id = self.env['account.account'].search([('name','=','Account Payable'),('company_id','=',comp_id.id)], limit=1)
-                    acc_journal_id = self.env['account.journal'].search([('name','ilike',self.journal_id.name),('company_id','=',comp_id.id)], limit=1)
-                    if not int_comp_acc_id:
-                        raise UserError(_("Please create an intercompany account!"))
-                    if not acc_rec_id:
-                        raise UserError(_("Please create a receivable account for %s company!",comp_id.id))
-                    if not acc_pay_id:
-                        raise UserError(_("Please create a payable account for %s company!",comp_id.id))
-                    if not acc_journal_id:
-                        raise UserError(_("Please create an account journal for %s company!",comp_id.id))
-                    #Vendor Bill or Refund
-                    if move_type in ['in_invoice', 'in_refund']:
-                        journal_lines.append((0, 0, {
-                            'account_id': int_comp_acc_id.id,
-                            'debit': intercompany_total_amount,
-                            'credit': 0
-                        }))
-                        journal_lines.append((0, 0, {
-                            'account_id': acc_pay_id.id,
-                            'debit': 0,
-                            'credit': intercompany_total_amount
-                        }))
-                    if move_type in ['out_invoice','out_refund']:
-                        journal_lines.append((0, 0, {
-                            'account_id': int_comp_acc_id.id,
-                            'debit': 0,
-                            'credit': intercompany_total_amount
-                        }))
-                        journal_lines.append((0, 0, {
-                            'account_id': acc_rec_id.id,
-                            'debit': intercompany_total_amount,
-                            'credit': 0
-                        }))
-                    #Post the intercompany journal entry after creating it
-                    inter_comp_journal_entry = self.env['account.move'].create({
-                            'partner_id': inv_bill.partner_id.id,
-                            'date': self.payment_date,
-                            'invoice_date_due': self.payment_date,
-                            'company_id': comp_id.id,
-                            'journal_id': acc_journal_id.id,
-                            'move_type': 'entry',
-                            'name': False,
-                            'ref': intercompany_move_name,
-                            'line_ids': journal_lines
-                        })
-                    intercompany_journal_entries_list.append(inter_comp_journal_entry)
-                    inter_comp_journal_entry.action_post()
-                # Update payment method for payments list for creating payments
-                for pay_val in payment_vals_list:
-                    if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'outbound':
-                        pay_val.update({'payment_method_id': inv_bill.vendor_payment_method.id})
-                        if intercompany_journal_entries_list:
-                            for int_jrnl_entry in intercompany_journal_entries_list:
-                                if int_jrnl_entry.ref in pay_val['ref']:
-                                    pay_val.update({'intercompany_move_ids': [(6,0,[int_jrnl_entry.id])]})
-                                else:
-                                    continue
-                    if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'inbound':
-                        pay_val.update({'payment_method_id': inv_bill.customer_payment_method.id})
-                        if intercompany_journal_entries_list:
-                            for int_jrnl_entry in intercompany_journal_entries_list:
-                                if int_jrnl_entry.ref in pay_val['ref']:
-                                    pay_val.update({'intercompany_move_ids': [(6,0,[int_jrnl_entry.id])]})
-                                else:
-                                    continue
+                    intercompany_companies_list.append(comp_id)
+            for comp_id in intercompany_companies_list:
+                journal_lines = []
+                intercompany_total_amount = 0.0
+                #Get intercompany amount
+                intercompany_move_names_list = []
+                intercompany_move_ids = inv_bill.account_move_ids.filtered(lambda mv: mv.company_id == comp_id).sorted(lambda m: m.id)
+                for move in intercompany_move_ids:
+                    intercompany_total_amount += move.amount_total
+                    intercompany_move_names_list.append(move.name)
+                intercompany_move_name = ' '.join([nm for nm in intercompany_move_names_list])
+                #search intercompany account
+                move_type = inv_bill.account_move_ids.mapped('move_type')[0]
+                int_comp_acc_id = self.env['account.account'].search([('name','ilike','Intercompany'),('company_id','=',comp_id.id)], limit=1)
+                acc_rec_id = self.env['account.account'].search([('name','=','Account Receivable'),('company_id','=',comp_id.id)], limit=1)
+                acc_pay_id = self.env['account.account'].search([('name','=','Account Payable'),('company_id','=',comp_id.id)], limit=1)
+                int_acc_journal_id = self.env['account.journal'].search([('name','ilike','Intercompany Transactions'),('company_id','=',comp_id.id)], limit=1)
+                if not int_comp_acc_id:
+                    raise UserError(_("Please create an intercompany account!"))
+                if not acc_rec_id:
+                    raise UserError(_("Please create a receivable account for %s company!",comp_id.id))
+                if not acc_pay_id:
+                    raise UserError(_("Please create a payable account for %s company!",comp_id.id))
+                if not int_acc_journal_id:
+                    raise UserError(_("Please create an inter-company account journal for %s company!",comp_id.id))
+                #Vendor Bill or Refund
+                if move_type in ['in_invoice', 'in_refund']:
+                    journal_lines.append((0, 0, {
+                        'account_id': int_comp_acc_id.id,
+                        'debit': intercompany_total_amount,
+                        'credit': 0,
+                    }))
+                    journal_lines.append((0, 0, {
+                        'account_id': acc_pay_id.id,
+                        'debit': 0,
+                        'credit': intercompany_total_amount
+                    }))
+                if move_type in ['out_invoice','out_refund']:
+                    journal_lines.append((0, 0, {
+                        'account_id': int_comp_acc_id.id,
+                        'debit': 0,
+                        'credit': intercompany_total_amount
+                    }))
+                    journal_lines.append((0, 0, {
+                        'account_id': acc_rec_id.id,
+                        'debit': intercompany_total_amount,
+                        'credit': 0
+                    }))
+                #Post the intercompany journal entry after creating it
+                inter_comp_journal_entry = self.env['account.move'].create({
+                        'partner_id': inv_bill.partner_id.id,
+                        'date': self.payment_date,
+                        'invoice_date_due': self.payment_date,
+                        'company_id': comp_id.id,
+                        'journal_id': int_acc_journal_id.id,
+                        'move_type': 'entry',
+                        'name': False,
+                        'ref': intercompany_move_name,
+                        'line_ids': journal_lines
+                    })
+                intercompany_journal_entries_list.append(inter_comp_journal_entry)
+                inter_comp_journal_entry.action_post()
+            #find the receivable or payable account for payment of particular selected company in wizard.
+            dest_acc_rec_id = self.env['account.account'].search([('name','=','Account Receivable'),('company_id','=',self.company_id.id)], limit=1)
+            dest_acc_pay_id = self.env['account.account'].search([('name','=','Account Payable'),('company_id','=',self.company_id.id)], limit=1)
+            if not dest_acc_rec_id:
+                raise UserError(_("Please create a receivable account for %s company!",self.company_id.id))
+            if not dest_acc_pay_id:
+                raise UserError(_("Please create a payable account for %s company!",self.company_id.id))
+            # Update payment method for payments list for creating payments
+            for pay_val in payment_vals_list:
+                if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'outbound':
+                    pay_val.update({'payment_method_id': inv_bill.vendor_payment_method.id, 'destination_account_id': dest_acc_pay_id.id})
+                    if intercompany_journal_entries_list:
+                        intercompany_journal_entries_ids_list = []
+                        for int_jrnl_entry in intercompany_journal_entries_list:
+                            if int_jrnl_entry.ref in pay_val['ref']:
+                                intercompany_journal_entries_ids_list.append(int_jrnl_entry.id)
+                            else:
+                                continue
+                    pay_val.update({'intercompany_move_ids': [(6,0,intercompany_journal_entries_ids_list)]})
+                if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'inbound':
+                    pay_val.update({'payment_method_id': inv_bill.customer_payment_method.id, 'destination_account_id': dest_acc_rec_id.id})
+                    if intercompany_journal_entries_list:
+                        intercompany_journal_entries_ids_list = []
+                        for int_jrnl_entry in intercompany_journal_entries_list:
+                            if int_jrnl_entry.ref in pay_val['ref']:
+                                intercompany_journal_entries_ids_list.append(int_jrnl_entry.id)
+                            else:
+                                continue
+                    pay_val.update({'intercompany_move_ids': [(6,0,intercompany_journal_entries_ids_list)]})
         
         payments = self.env['account.payment'].create(payment_vals_list)
         #update intercompany journal entry in related payment.
