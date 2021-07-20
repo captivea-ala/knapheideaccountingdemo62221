@@ -81,13 +81,13 @@ class AccountPayment(models.Model):
                     partner_type = 'supplier'
 
                 liquidity_amount = liquidity_lines.amount_currency
-
+                print ("liquidity_amount --->>", liquidity_amount)
                 move_vals_to_write.update({
                     'currency_id': liquidity_lines.currency_id.id,
                     'partner_id': liquidity_lines.partner_id.id,
                 })
                 payment_vals_to_write.update({
-                    'amount': abs(counterpart_lines[0].amount_currency),
+                    'amount': abs(liquidity_amount),
                     'payment_type': 'inbound' if liquidity_amount > 0.0 else 'outbound',
                     'partner_type': partner_type,
                     'currency_id': liquidity_lines.currency_id.id,
@@ -199,14 +199,14 @@ class AccountPayment(models.Model):
                 {
                     'name': liquidity_line_name or default_line_name,
                     'date_maturity': self.date,
-                    'amount_currency': ar_ap_balance + write_off_amount_currency if currency_id else 0.0,
-                    'currency_id': currency_id,
-                    'debit': ar_ap_balance + write_off_balance < 0.0 and -ar_ap_balance - write_off_balance or 0.0,
-                    'credit': ar_ap_balance + write_off_balance > 0.0 and ar_ap_balance + write_off_balance or 0.0,
-                    # 'amount_currency': -counterpart_amount_currency,
+                    # 'amount_currency': ar_ap_balance + write_off_amount_currency if currency_id else 0.0,
                     # 'currency_id': currency_id,
-                    # 'debit': balance < 0.0 and -balance or 0.0,
-                    # 'credit': balance > 0.0 and balance or 0.0,
+                    # 'debit': ar_ap_balance + write_off_balance < 0.0 and -ar_ap_balance - write_off_balance or 0.0,
+                    # 'credit': ar_ap_balance + write_off_balance > 0.0 and ar_ap_balance + write_off_balance or 0.0,
+                    'amount_currency': -counterpart_amount_currency,
+                    'currency_id': currency_id,
+                    'debit': balance < 0.0 and -balance or 0.0,
+                    'credit': balance > 0.0 and balance or 0.0,
                     'partner_id': self.partner_id.id,
                     'account_id': self.journal_id.payment_debit_account_id.id if balance < 0.0 else self.journal_id.payment_credit_account_id.id,
                 },
@@ -214,14 +214,14 @@ class AccountPayment(models.Model):
                 {
                     'name': self.payment_reference or default_line_name,
                     'date_maturity': self.date,
-                    # 'amount_currency': ar_ap_balance + write_off_amount_currency if currency_id else 0.0,
-                    # 'currency_id': currency_id,
-                    # 'debit': ar_ap_balance + write_off_balance > 0.0 and ar_ap_balance + write_off_balance or 0.0,
-                    # 'credit': ar_ap_balance + write_off_balance < 0.0 and -ar_ap_balance - write_off_balance or 0.0,
-                    'amount_currency': -counterpart_amount_currency,
+                    'amount_currency': ar_ap_balance + write_off_amount_currency if currency_id else 0.0,
                     'currency_id': currency_id,
-                    'debit': balance > 0.0 and balance or 0.0,
-                    'credit': balance < 0.0 and -balance or 0.0,
+                    'debit': ar_ap_balance + write_off_balance > 0.0 and ar_ap_balance + write_off_balance or 0.0,
+                    'credit': ar_ap_balance + write_off_balance < 0.0 and -ar_ap_balance - write_off_balance or 0.0,
+                    # 'amount_currency': -counterpart_amount_currency,
+                    # 'currency_id': currency_id,
+                    # 'debit': balance > 0.0 and balance or 0.0,
+                    # 'credit': balance < 0.0 and -balance or 0.0,
                     'partner_id': self.partner_id.id,
                     'account_id': self.destination_account_id.id,
                 },
@@ -230,8 +230,8 @@ class AccountPayment(models.Model):
                     'date_maturity': self.date,
                     'amount_currency': intercompany_amount_total + write_off_amount_currency if currency_id else 0.0,
                     'currency_id': currency_id,
-                    'debit': intercompany_amount_total + write_off_balance < 0.0 and -intercompany_amount_total - write_off_balanceintercompany_amount_total + write_off_balance or 0.0,
-                    'credit': intercompany_amount_total + write_off_balance > 0.0 and intercompany_amount_total + write_off_balance or 0.0,
+                    'debit': intercompany_amount_total + write_off_balance > 0.0 and intercompany_amount_total + write_off_balance or 0.0,
+                    'credit': intercompany_amount_total + write_off_balance < 0.0 and -intercompany_amount_total - write_off_balance or 0.0,
                     'partner_id': self.partner_id.id,
                     'account_id': intercompany_account_id.id,
                 },
@@ -312,22 +312,25 @@ class AccountMoveLine(models.Model):
         sorted_lines = self.sorted(key=lambda line: (line.date_maturity or line.date, line.currency_id))
 
         # ==== Collect all involved lines through the existing reconciliation ====
-
+        # print ("sorted_lines --->>", sorted_lines)
         involved_lines = sorted_lines
         involved_partials = self.env['account.partial.reconcile']
         current_lines = involved_lines
         current_partials = involved_partials
+        print ("involved_lines --1->> ",involved_lines)
         while current_lines:
             current_partials = (current_lines.matched_debit_ids + current_lines.matched_credit_ids) - current_partials
+            print ("current_partials --->>", current_partials)
             involved_partials += current_partials
             current_lines = (current_partials.debit_move_id + current_partials.credit_move_id) - current_lines
             involved_lines += current_lines
 
         # ==== Create partials ====
-
+        print ("involved_lines -2--->>", involved_lines)
         partials = self.env['account.partial.reconcile'].create(sorted_lines._prepare_reconciliation_partials())
 
         # Track newly created partials.
+        print ("partials --->>", partials)
         results['partials'] = partials
         involved_partials += partials
 
@@ -344,7 +347,7 @@ class AccountMoveLine(models.Model):
             is_full_needed = all(line.currency_id.is_zero(line.amount_residual_currency) for line in involved_lines)
         else:
             is_full_needed = all(line.company_currency_id.is_zero(line.amount_residual) for line in involved_lines)
-
+        print ("is_full_needed --->>", is_full_needed)
         if is_full_needed:
 
             # ==== Create the exchange difference move ====
@@ -374,7 +377,9 @@ class AccountMoveLine(models.Model):
                 'partial_reconcile_ids': [(6, 0, involved_partials.ids)],
                 'reconciled_line_ids': [(6, 0, involved_lines.ids)],
             })
-
+        print ("not_paid_invoices --->>", not_paid_invoices)
+        print ("results --->>", results)
+        # kfvmdflkmlv
         # Trigger action for paid invoices
         not_paid_invoices\
             .filtered(lambda move: move.payment_state in ('paid', 'in_payment'))\

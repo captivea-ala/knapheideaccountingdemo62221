@@ -50,6 +50,7 @@ class AccountPaymentRegister(models.TransientModel):
         help="Only one payment will be created by partner (bank)/ currency.")
     
     invoice_bill_ids = fields.Many2many("unique.invoice.bills",'unique_invoice_bills_acc_pay_reg_rel','invoice_bill_id','account_payment_register_id',"Unique Invoices/Bills")
+
     
     # @api.depends('can_edit_wizard')
     # def _compute_group_payment(self):
@@ -303,25 +304,29 @@ class AccountPaymentRegister(models.TransientModel):
                 #Vendor Bill or Refund
                 if move_type in ['in_invoice', 'in_refund']:
                     journal_lines.append((0, 0, {
+                        'partner_id': inv_bill.partner_id.id,
                         'account_id': int_comp_acc_id.id,
-                        'debit': intercompany_total_amount,
-                        'credit': 0,
-                    }))
-                    journal_lines.append((0, 0, {
-                        'account_id': acc_pay_id.id,
                         'debit': 0,
                         'credit': intercompany_total_amount
+                    }))
+                    journal_lines.append((0, 0, {
+                        'partner_id': inv_bill.partner_id.id,
+                        'account_id': acc_pay_id.id,
+                        'debit': intercompany_total_amount,
+                        'credit': 0
                     }))
                 if move_type in ['out_invoice','out_refund']:
                     journal_lines.append((0, 0, {
+                        'partner_id': inv_bill.partner_id.id,
                         'account_id': int_comp_acc_id.id,
-                        'debit': 0,
-                        'credit': intercompany_total_amount
-                    }))
-                    journal_lines.append((0, 0, {
-                        'account_id': acc_rec_id.id,
                         'debit': intercompany_total_amount,
                         'credit': 0
+                    }))
+                    journal_lines.append((0, 0, {
+                        'partner_id': inv_bill.partner_id.id,
+                        'account_id': acc_rec_id.id,
+                        'debit': 0,
+                        'credit': intercompany_total_amount
                     }))
                 #Post the intercompany journal entry after creating it
                 inter_comp_journal_entry = self.env['account.move'].create({
@@ -422,9 +427,12 @@ class AccountPaymentRegister(models.TransientModel):
                 continue
 
             payment_lines = payment.line_ids.filtered_domain(domain)
+            print ('payment.line_ids --->>', payment.line_ids)
+            print ("payment_lines --->>", payment_lines)
+            print ("lines --->>", payment.line_ids)
             for account in payment_lines.account_id:
                 (payment_lines + lines)\
-                    .filtered_domain([('reconciled', '=', False)])\
+                    .filtered_domain([('company_id','=',self.company_id.id),('reconciled', '=', False)])\
                     .reconcile()
                 # (payment_lines + lines)\
                 #     .filtered_domain([('account_id', '=', account.id), ('reconciled', '=', False)])\
@@ -445,6 +453,20 @@ class AccountPaymentRegister(models.TransientModel):
             journal = self.env['account.journal'].search(domain)
         res = {}
         res['domain'] = {'journal_id': [('id','in',journal.ids)]}
+        print ("self lines --->>", self.line_ids)
+        print ("self.company_id --->>", self.company_id)
+        intercompany_account_id = self.env['account.account'].search([('name','=','Intercompany'), ('company_id','=',self.company_id.id)], limit=1)
+        acc_rec_id = self.env['account.account'].search([('name','=','Account Receivable'),('company_id','=',self.company_id.id)], limit=1)
+        acc_pay_id = self.env['account.account'].search([('name','=','Account Payable'),('company_id','=',self.company_id.id)], limit=1)
+        for ji_line in self.line_ids:
+            if ji_line.company_id != self.company_id:
+                ji_line.update({'account_id': intercompany_account_id.id})
+            elif ji_line.company_id == self.company_id:
+                if self.payment_type == 'outbound':
+                    ji_line.update({'account_id': acc_pay_id.id})
+                elif self.payment_type == 'inbound':
+                    ji_line.update({'account_id': acc_rec_id.id})
+        print ("self.payment_type --->>",self.payment_type)
         return res
     
 class UniqueInvoiceBill(models.TransientModel):
