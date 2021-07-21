@@ -81,7 +81,6 @@ class AccountPayment(models.Model):
                     partner_type = 'supplier'
 
                 liquidity_amount = liquidity_lines.amount_currency
-                print ("liquidity_amount --->>", liquidity_amount)
                 move_vals_to_write.update({
                     'currency_id': liquidity_lines.currency_id.id,
                     'partner_id': liquidity_lines.partner_id.id,
@@ -312,25 +311,20 @@ class AccountMoveLine(models.Model):
         sorted_lines = self.sorted(key=lambda line: (line.date_maturity or line.date, line.currency_id))
 
         # ==== Collect all involved lines through the existing reconciliation ====
-        # print ("sorted_lines --->>", sorted_lines)
         involved_lines = sorted_lines
         involved_partials = self.env['account.partial.reconcile']
         current_lines = involved_lines
         current_partials = involved_partials
-        print ("involved_lines --1->> ",involved_lines)
         while current_lines:
             current_partials = (current_lines.matched_debit_ids + current_lines.matched_credit_ids) - current_partials
-            print ("current_partials --->>", current_partials)
             involved_partials += current_partials
             current_lines = (current_partials.debit_move_id + current_partials.credit_move_id) - current_lines
             involved_lines += current_lines
 
         # ==== Create partials ====
-        print ("involved_lines -2--->>", involved_lines)
         partials = self.env['account.partial.reconcile'].create(sorted_lines._prepare_reconciliation_partials())
 
         # Track newly created partials.
-        print ("partials --->>", partials)
         results['partials'] = partials
         involved_partials += partials
 
@@ -347,7 +341,6 @@ class AccountMoveLine(models.Model):
             is_full_needed = all(line.currency_id.is_zero(line.amount_residual_currency) for line in involved_lines)
         else:
             is_full_needed = all(line.company_currency_id.is_zero(line.amount_residual) for line in involved_lines)
-        print ("is_full_needed --->>", is_full_needed)
         if is_full_needed:
 
             # ==== Create the exchange difference move ====
@@ -377,8 +370,6 @@ class AccountMoveLine(models.Model):
                 'partial_reconcile_ids': [(6, 0, involved_partials.ids)],
                 'reconciled_line_ids': [(6, 0, involved_lines.ids)],
             })
-        print ("not_paid_invoices --->>", not_paid_invoices)
-        print ("results --->>", results)
         # kfvmdflkmlv
         # Trigger action for paid invoices
         not_paid_invoices\

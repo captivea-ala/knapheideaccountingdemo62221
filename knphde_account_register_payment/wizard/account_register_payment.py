@@ -353,8 +353,8 @@ class AccountPaymentRegister(models.TransientModel):
             for pay_val in payment_vals_list:
                 if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'outbound':
                     pay_val.update({'payment_method_id': inv_bill.vendor_payment_method.id, 'destination_account_id': dest_acc_pay_id.id})
+                    intercompany_journal_entries_ids_list = []
                     if intercompany_journal_entries_list:
-                        intercompany_journal_entries_ids_list = []
                         for int_jrnl_entry in intercompany_journal_entries_list:
                             if int_jrnl_entry.ref in pay_val['ref']:
                                 intercompany_journal_entries_ids_list.append(int_jrnl_entry.id)
@@ -363,8 +363,8 @@ class AccountPaymentRegister(models.TransientModel):
                     pay_val.update({'intercompany_move_ids': [(6,0,intercompany_journal_entries_ids_list)]})
                 if pay_val['amount'] == inv_bill.total_amount and pay_val['payment_type'] == 'inbound':
                     pay_val.update({'payment_method_id': inv_bill.customer_payment_method.id, 'destination_account_id': dest_acc_rec_id.id})
+                    intercompany_journal_entries_ids_list = []
                     if intercompany_journal_entries_list:
-                        intercompany_journal_entries_ids_list = []
                         for int_jrnl_entry in intercompany_journal_entries_list:
                             if int_jrnl_entry.ref in pay_val['ref']:
                                 intercompany_journal_entries_ids_list.append(int_jrnl_entry.id)
@@ -427,9 +427,6 @@ class AccountPaymentRegister(models.TransientModel):
                 continue
 
             payment_lines = payment.line_ids.filtered_domain(domain)
-            print ('payment.line_ids --->>', payment.line_ids)
-            print ("payment_lines --->>", payment_lines)
-            print ("lines --->>", payment.line_ids)
             for account in payment_lines.account_id:
                 (payment_lines + lines)\
                     .filtered_domain([('company_id','=',self.company_id.id),('reconciled', '=', False)])\
@@ -453,20 +450,6 @@ class AccountPaymentRegister(models.TransientModel):
             journal = self.env['account.journal'].search(domain)
         res = {}
         res['domain'] = {'journal_id': [('id','in',journal.ids)]}
-        print ("self lines --->>", self.line_ids)
-        print ("self.company_id --->>", self.company_id)
-        intercompany_account_id = self.env['account.account'].search([('name','=','Intercompany'), ('company_id','=',self.company_id.id)], limit=1)
-        acc_rec_id = self.env['account.account'].search([('name','=','Account Receivable'),('company_id','=',self.company_id.id)], limit=1)
-        acc_pay_id = self.env['account.account'].search([('name','=','Account Payable'),('company_id','=',self.company_id.id)], limit=1)
-        for ji_line in self.line_ids:
-            if ji_line.company_id != self.company_id:
-                ji_line.update({'account_id': intercompany_account_id.id})
-            elif ji_line.company_id == self.company_id:
-                if self.payment_type == 'outbound':
-                    ji_line.update({'account_id': acc_pay_id.id})
-                elif self.payment_type == 'inbound':
-                    ji_line.update({'account_id': acc_rec_id.id})
-        print ("self.payment_type --->>",self.payment_type)
         return res
     
 class UniqueInvoiceBill(models.TransientModel):
