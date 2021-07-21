@@ -285,7 +285,10 @@ class AccountPaymentRegister(models.TransientModel):
                 intercompany_move_ids = inv_bill.account_move_ids.filtered(lambda mv: mv.company_id == comp_id).sorted(lambda m: m.id)
                 for move in intercompany_move_ids:
                     intercompany_total_amount += move.amount_total
-                    intercompany_move_names_list.append(move.name)
+                    if move.ref:
+                        intercompany_move_names_list.append(move.ref)
+                    else:
+                        intercompany_move_names_list.append(move.name)
                 intercompany_move_name = ' '.join([nm for nm in intercompany_move_names_list])
                 #search intercompany account
                 move_type = inv_bill.account_move_ids.mapped('move_type')[0]
@@ -356,7 +359,7 @@ class AccountPaymentRegister(models.TransientModel):
                     intercompany_journal_entries_ids_list = []
                     if intercompany_journal_entries_list:
                         for int_jrnl_entry in intercompany_journal_entries_list:
-                            if int_jrnl_entry.ref in pay_val['ref']:
+                            if any(int_move_nm in pay_val['ref'] for int_move_nm in intercompany_move_names_list):
                                 intercompany_journal_entries_ids_list.append(int_jrnl_entry.id)
                             else:
                                 continue
@@ -366,7 +369,7 @@ class AccountPaymentRegister(models.TransientModel):
                     intercompany_journal_entries_ids_list = []
                     if intercompany_journal_entries_list:
                         for int_jrnl_entry in intercompany_journal_entries_list:
-                            if int_jrnl_entry.ref in pay_val['ref']:
+                            if any(int_move_nm in pay_val['ref'] for int_move_nm in intercompany_move_names_list):
                                 intercompany_journal_entries_ids_list.append(int_jrnl_entry.id)
                             else:
                                 continue
