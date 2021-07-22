@@ -392,7 +392,7 @@ class AccountPaymentRegister(models.TransientModel):
                     intercompany_moves_amount_total += mv1.amount_total
                 if int_je.amount_total == intercompany_moves_amount_total:
                     for mv2 in mv:
-                        m2.js_assign_outstanding_line(move_line_id.id)
+                        mv2.js_assign_outstanding_line(move_line_id.id)
                 intercompany_moves.remove(mv)
         # If payments are made using a currency different than the source one, ensure the balance match exactly in
         # order to fully paid the source journal items.
