@@ -272,6 +272,7 @@ class AccountPaymentRegister(models.TransientModel):
 
         #create intercompany journal entries if the payment company and journal item entry is different.
         intercompany_journal_entries_list = []
+        intercompany_moves = []
         for inv_bill in self.invoice_bill_ids:
             intercompany_companies_list = []
             for comp_id in inv_bill.company_ids:
@@ -283,6 +284,7 @@ class AccountPaymentRegister(models.TransientModel):
                 #Get intercompany amount
                 intercompany_move_names_list = []
                 intercompany_move_ids = inv_bill.account_move_ids.filtered(lambda mv: mv.company_id == comp_id).sorted(lambda m: m.id)
+                intercompany_moves.append(intercompany_move_ids)
                 for move in intercompany_move_ids:
                     intercompany_total_amount += move.amount_total
                     if move.ref:
@@ -308,28 +310,28 @@ class AccountPaymentRegister(models.TransientModel):
                 if move_type in ['in_invoice', 'in_refund']:
                     journal_lines.append((0, 0, {
                         'partner_id': inv_bill.partner_id.id,
-                        'account_id': int_comp_acc_id.id,
-                        'debit': 0,
-                        'credit': intercompany_total_amount
-                    }))
-                    journal_lines.append((0, 0, {
-                        'partner_id': inv_bill.partner_id.id,
                         'account_id': acc_pay_id.id,
                         'debit': intercompany_total_amount,
                         'credit': 0
                     }))
-                if move_type in ['out_invoice','out_refund']:
                     journal_lines.append((0, 0, {
                         'partner_id': inv_bill.partner_id.id,
                         'account_id': int_comp_acc_id.id,
-                        'debit': intercompany_total_amount,
-                        'credit': 0
+                        'debit': 0,
+                        'credit': intercompany_total_amount
                     }))
+                if move_type in ['out_invoice','out_refund']:
                     journal_lines.append((0, 0, {
                         'partner_id': inv_bill.partner_id.id,
                         'account_id': acc_rec_id.id,
                         'debit': 0,
                         'credit': intercompany_total_amount
+                    }))
+                    journal_lines.append((0, 0, {
+                        'partner_id': inv_bill.partner_id.id,
+                        'account_id': int_comp_acc_id.id,
+                        'debit': intercompany_total_amount,
+                        'credit': 0
                     }))
                 #Post the intercompany journal entry after creating it
                 inter_comp_journal_entry = self.env['account.move'].create({
@@ -374,7 +376,6 @@ class AccountPaymentRegister(models.TransientModel):
                             else:
                                 continue
                     pay_val.update({'intercompany_move_ids': [(6,0,intercompany_journal_entries_ids_list)]})
-        
         payments = self.env['account.payment'].create(payment_vals_list)
         #update intercompany journal entry in related payment.
         # print ("intercompany_journal_entries_list --->>", intercompany_journal_entries_list)
@@ -383,7 +384,16 @@ class AccountPaymentRegister(models.TransientModel):
         #         for int_jrnl_entry in intercompany_journal_entries_list:
         #             if int_jrnl_entry.ref in payment.ref:
         #                 payment.update({'intercompany_move_ids': [(6,0,[int_jrnl_entry.id])]})
-        
+        for int_je in intercompany_journal_entries_list:
+            move_line_id = self.env['account.move.line'].search([('move_id','=',int_je.id)], limit=1)
+            intercompany_moves_amount_total = 0.0
+            for mv in intercompany_moves:
+                for mv1 in mv:
+                    intercompany_moves_amount_total += mv1.amount_total
+                if int_je.amount_total == intercompany_moves_amount_total:
+                    for mv2 in mv:
+                        m2.js_assign_outstanding_line(move_line_id.id)
+                intercompany_moves.remove(mv)
         # If payments are made using a currency different than the source one, ensure the balance match exactly in
         # order to fully paid the source journal items.
         # For example, suppose a new currency B having a rate 100:1 regarding the company currency A.
