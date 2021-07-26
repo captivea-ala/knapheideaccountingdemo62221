@@ -12,12 +12,19 @@ class AccountPayment(models.Model):
     intercompany_move_ids = fields.Many2many("account.move", 'acc_mv_acc_pmnt_rel', 'account_payment_id', 'account_move_id', string="Intercompany Journal Entry")
     
     def unlink(self):
-        # OVERRIDE to unlink the inherited account.move (move_id field) as well.
+        # OVERRIDE to unlink the inherited account.move (move_id field) as well. Cancel the intercompany
+        # moves as well and reset the bills/invoices to posted state
         # moves = self.with_context(force_delete=True).move_id
         intercompany_moves = self.with_context(force_delete=True).intercompany_move_ids
         res = super().unlink()
         if intercompany_moves:
             for int_move in intercompany_moves:
+                bill_reference_list = int_move.ref.split(' ')
+                for ref in bill_reference_list:
+                    inv_bill_id = self.env['account.move'].search(['|',('ref','=', ref),('name','=',ref)], limit=1)
+                    if inv_bill_id:
+                        inv_bill_id.button_draft()
+                        inv_bill_id.action_post()
                 int_move.button_draft()
                 int_move.button_cancel()
         return res
